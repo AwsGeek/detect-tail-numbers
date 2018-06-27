@@ -1,0 +1,58 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+
+Resources: 
+
+  LambdaPolicy:
+    Type: AWS::IAM::Policy
+    Properties: 
+      PolicyName: detect-tail-numbers
+      Roles:
+        - !Ref LambdaRole
+      PolicyDocument: 
+        Version: 2012-10-17
+        Statement: 
+          - 
+            Effect: Allow
+            Action: 
+                - logs:CreateLogGroup
+                - logs:CreateLogStream
+                - logs:PutLogEvents
+            Resource: arn:aws:logs:*:*:*
+          - 
+            Effect: Allow
+            Action: 
+                - s3:GetObject
+            Resource: "arn:aws:s3:::*"
+          - 
+            Effect: Allow
+            Action: 
+                - rekognition:DetectText
+            Resource: "*"
+  LambdaRole: 
+    Type: AWS::IAM::Role
+    Properties: 
+      AssumeRolePolicyDocument: 
+        Version: 2012-10-17
+        Statement: 
+          - 
+            Effect: Allow
+            Principal: 
+              Service: 
+                - lambda.amazonaws.com
+            Action: 
+              - sts:AssumeRole
+      Path: "/"
+                
+  LambdaFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: lambda.handler
+      Runtime: python2.7
+      CodeUri: ./lambda
+      Timeout: 10
+      Role: !GetAtt [LambdaRole, Arn]
+      Environment:
+        Variables:
+          ttl: 6000
+
