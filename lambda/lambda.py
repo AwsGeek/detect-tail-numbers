@@ -2,7 +2,7 @@ from __future__ import print_function
 
 import re
 import boto3
-import urllib
+import urllib2
 from botocore.vendored import requests
 
 #nnum = re.compile('N[1-9]((\d{0,4})|(\d{0,3}[A-HJ-NP-Z])|(\d{0,2}[A-HJ-NP-Z]{2}))')
@@ -32,15 +32,21 @@ tailre = re.compile('(N[1-9]\d{0,4}|N[1-9]\d{0,3}[A-HJ-NP-Z]|N[1-9]\d{0,2}[A-HJ-
 
 def handler(event, context):
 
-    bucket = event['bucket']
-    key = urllib.unquote_plus(event['key'].encode('utf8'))
+    if 'url' in event:
+      url = event['url']
+      response = urllib2.urlopen(url)
+      image = {'Bytes': response.read()}
+    else if 'bucket' in event and 'key' in event:
+      bucket = event['bucket']
+      key = urllib.unquote_plus(event['key'].encode('utf8'))
+      image = { "S3Object": { "Bucket": bucket, "Name": key} }
+    else:
+      return []
  
     try:
         tail_numbers = []
         # Use AWS Rekognition to extract text from the image
-        response = rek.detect_text( Image = { "S3Object":
-          { "Bucket": bucket, "Name": key}
-        })
+        response = rek.detect_text( Image = image )
         detections = response['TextDetections']
         for detection in detections:
             string = detection['DetectedText']
