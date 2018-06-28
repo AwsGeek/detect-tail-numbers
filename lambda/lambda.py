@@ -5,64 +5,71 @@ import boto3
 import urllib2
 from botocore.vendored import requests
 
-#nnum = re.compile('N[1-9]((\d{0,4})|(\d{0,3}[A-HJ-NP-Z])|(\d{0,2}[A-HJ-NP-Z]{2}))')
-
 print('Loading function')
 
 rek = boto3.client('rekognition')
 
 # A regex to extract aircraft model number from the returned HTML
-modelre = re.compile('<span id=\"content_Label7\" class=\"Results_DataText\">(.*)<\/span>')
-
-def get_aircraft_from_tail_number(tail):
-
-  # Could also DL the CSV database from FAA nightly and query directly
-  response = requests.get("http://registry.faa.gov/aircraftinquiry/NNum_Results.aspx?NNumbertxt=%s" % (tail))
+def tailNumberLookup(tail):
+  print("Looking up tail number: %s" % (tail))
+  
+  query = "https://www.google.com/search?num=1&q=%s+site:www.planespotters.net+inurl:airframe" % (tail)
+  response = requests.get(query)
   if response.status_code == requests.codes.ok:
-    matches = modelre.findall(response.content)
+    matches = tailNumberLookup.regex.search(response.content)
+    print(matches)
     if matches:
-      return matches[0].strip()
+      return "%s %s" % (matches.group(1).strip(), matches.group(2).strip())
 
   return None
+tailNumberLookup.regex = re.compile('https://www.planespotters.net/airframe/(.*?)/(.*?)/(.*?)/.*')
 
 
-# regex to extract US tail numbers from strings. 
+# regex to extract tail numbers from strings
 # source: https://onehundredairports.com/2015/09/04/creating-a-regular-expression-for-us-tail-numbers/
-tailre = re.compile('(N[1-9]\d{0,4}|N[1-9]\d{0,3}[A-HJ-NP-Z]|N[1-9]\d{0,2}[A-HJ-NP-Z]{2})')
+# https://en.wikipedia.org/wiki/List_of_aircraft_registration_prefixes
+tailNumberRegexs = [
+  re.compile('(N[1-9]\d{0,4}|N[1-9]\d{0,3}[A-HJ-NP-Z]|N[1-9]\d{0,2}[A-HJ-NP-Z]{2})'),  # US
+  re.compile('(C-G[A-Z]{3}|C-F[A-Z]{3})'),                                             # CA
+  re.compile('(X[A-C]-[A-Z]{3})'),                                                     # MX
+]
 
 def handler(event, context):
 
-    if 'url' in event:
-      url = event['url']
-      response = urllib2.urlopen(url)
-      image = {'Bytes': response.read()}
-    else if 'bucket' in event and 'key' in event:
-      bucket = event['bucket']
-      key = urllib.unquote_plus(event['key'].encode('utf8'))
-      image = { "S3Object": { "Bucket": bucket, "Name": key} }
-    else:
-      return []
- 
+    aircraft = {}
+    
     try:
-        tail_numbers = []
+        if 'url' in event:
+          url = event['url']
+          response = urllib2.urlopen(url)
+          image = {'Bytes': response.read()}
+        elif 'bucket' in event and 'key' in event:
+          bucket = event['bucket']
+          key = urllib.unquote_plus(event['key'].encode('utf8'))
+          image = { "S3Object": { "Bucket": bucket, "Name": key} }
+        else:
+          return []
+          
         # Use AWS Rekognition to extract text from the image
         response = rek.detect_text( Image = image )
-        detections = response['TextDetections']
-        for detection in detections:
-            string = detection['DetectedText']
-            
-            if tailre.match(string):
-              # If the text looks like a tail number, query the FAA
-              aircraft = get_aircraft_from_tail_number(string)
-              if aircraft:
-                tail_numbers.append({ 'tail_number': string, 
-                                      'aircraft_type': aircraft, 
-                                      'bounding_box': detection['Geometry']['BoundingBox']})
+        textDetections = response['TextDetections']
+        for textDetection in textDetections:
+            detectedText = textDetection['DetectedText']
+            if detectedText in aircraft:
+                continue
 
-        print(tail_numbers)
-        return tail_numbers
+            for tailNumberRegex in tailNumberRegexs:
+                if tailNumberRegex.match(detectedText):
+                  # If the text looks like a tail number, query the FAA
+                  aircraftType = tailNumberLookup(detectedText)
+                  if aircraftType:
+                    aircraft[detectedText] = ({ 'tailNumber': detectedText, 
+                                                'aircraftType': aircraftType, 
+                                                'boundingBox': textDetection['Geometry']['BoundingBox']})
 
     except Exception as e:
         print(e)
-        print("Error processing {} from bucket {}. ".format(key, bucket)) 
-        raise e
+
+    print(aircraft.values())
+    return aircraft.values()
+
